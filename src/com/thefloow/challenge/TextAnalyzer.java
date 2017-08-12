@@ -114,8 +114,7 @@ public class TextAnalyzer {
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
                 while (mbb != null) {
 			try {
-				 if (counter*subChunkSize < chunkSize) {
-                                         l.info("parto dalla posizione "+(MY_POSITION-1)*chunkSize+counter*subChunkSize+" ed alloco "+subChunkSize+" bytes");
+				 if (counter*subChunkSize < chunkSize) {                                         
 					 mbb = fc.map(FileChannel.MapMode.READ_ONLY,(MY_POSITION-1)*chunkSize+counter*subChunkSize , subChunkSize);
 				 }
 				 else{
