@@ -3,6 +3,7 @@ package com.thefloow.challenge;
 import com.mongodb.MongoClientURI;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -19,6 +20,8 @@ import java.util.TreeMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bson.BsonDocument;
+import org.bson.conversions.Bson;
 
 
 
@@ -49,20 +52,30 @@ public class TextAnalyzer {
                 String filePath=null;
                 String host="localhost";
                 int port=27017;
-                for (int a=0; a < args.length; a+=2) {
+                for (int a=0; a < args.length; ) {
                  if (args[a].equals("-source")) {
                      File f = new File(args[a+1]);
                      if (f.exists()) {
                         filePath = f.getAbsolutePath();
                         l.info(filePath);
-                     }                     
+                     }
+                     a+=2;
                  }
                  if (args[a].equals("-mongo")) {
-                     String [] params=args[a+1].split(":");
-                     if (!params[0].isEmpty()) {
+                     String [] params=new String[0];                 
+                     if (a+1 < args.length) {
+                     params=args[a+1].split(":");
+                     }
+                     if (params.length != 0 ) {
+                        a+=2;
+                     }
+                     else {
+                      a++;
+                     }
+                     if (params.length != 0 && !params[0].isEmpty()) {
                          host=params[0];
                      }
-                     if (!params[1].isEmpty()) {
+                     if (params.length == 2 && !params[1].isEmpty()) {
                       port = new Integer(params[1]);
                      }
                  }
@@ -99,7 +112,7 @@ public class TextAnalyzer {
 		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);
 		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();                
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
-                while (mbb != null) {
+                /*while (mbb != null) {
 			try {
 				 if (counter*subChunkSize < chunkSize) {
                                          l.info("parto dalla posizione "+(MY_POSITION-1)*chunkSize+counter*subChunkSize+" ed alloco "+subChunkSize+" bytes");
@@ -165,7 +178,7 @@ public class TextAnalyzer {
 		   //Waiting for all of the threads to complete their work before going on with mine		   
 		   counter++;                   
                    //w.unlock();
-		}
+		}*/
                 java.util.Set<String> keys=wordCounts.keySet();
                 String [] keys_array = keys.toArray(new String[0]);                
                 f.close();
@@ -174,14 +187,22 @@ public class TextAnalyzer {
 		MongoDatabase db = m.getDatabase("word_count");		
 		com.mongodb.client.MongoCollection<org.bson.Document> coll = db.getCollection("counters");                		
                 Set<String> words=wordCounts.keySet();
-                String [] words_array=words.toArray(new String [0]);
-                java.util.LinkedList<org.bson.Document> docList = new java.util.LinkedList<org.bson.Document>();
+                String [] words_array=words.toArray(new String [0]);   
+                Bson filter; 
+                com.mongodb.client.model.UpdateOptions opt = new com.mongodb.client.model.UpdateOptions();
+                opt.upsert(true);
                 for (int a=0; a < words_array.length; a++) {                                    
-                    org.bson.Document doc = /*new org.bson.Document(supportMap);*/ new org.bson.Document();
-                    doc.append(words_array[a],wordCounts.get(words_array[a]));
-                    docList.add(doc);
-                }
-                coll.insertMany(docList);
+                    filter = Filters.exists(words_array[a]);
+                    org.bson.Document doc = /*new org.bson.Document(supportMap);*/ coll.find(filter).first();
+                    if (doc == null) {        
+                     doc = new org.bson.Document();
+                     doc.append(words_array[a],wordCounts.get(words_array[a]));                    
+                    }
+                    else {
+                        doc.replace(words_array[a],doc.getInteger(words_array[a]).intValue()+wordCounts.get(words_array[a]).intValue());
+                    }                    
+                    coll.updateOne(filter, doc, opt);
+                }                
 		m.close();				
 	}
         static class WorkerThread implements Runnable {              
