@@ -112,7 +112,7 @@ public class TextAnalyzer {
 		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);
 		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();                
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
-                /*while (mbb != null) {
+                while (mbb != null) {
 			try {
 				 if (counter*subChunkSize < chunkSize) {
                                          l.info("parto dalla posizione "+(MY_POSITION-1)*chunkSize+counter*subChunkSize+" ed alloco "+subChunkSize+" bytes");
@@ -178,7 +178,7 @@ public class TextAnalyzer {
 		   //Waiting for all of the threads to complete their work before going on with mine		   
 		   counter++;                   
                    //w.unlock();
-		}*/
+		}
                 java.util.Set<String> keys=wordCounts.keySet();
                 String [] keys_array = keys.toArray(new String[0]);                
                 f.close();
