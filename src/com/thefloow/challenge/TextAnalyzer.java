@@ -47,8 +47,7 @@ public class TextAnalyzer {
 	    //Someone, for now, has magically told me how many servers there are and what is my position among
 		//them
 		final int NUM_WORKERS=1;
-		final int MY_POSITION=1;
-		//final String filePath = "C:\\Users\\Paolo\\nuovo_test.xml";
+		final int MY_POSITION=1;		
                 String filePath=null;
                 String host="localhost";
                 int port=27017;
@@ -98,8 +97,7 @@ public class TextAnalyzer {
 			// TODO Auto-generated catch block
                         l.info(e.getMessage());
 			e.printStackTrace();
-		}
-                l.info("La dimensione massima e' "+chunkSize+" bytes e la dimensione del file e' "+f.length()+" bytes");
+		}                
 		long subChunkSize=chunkSize;
 		subChunkSize = Math.min(chunkSize, maxAllowedSubChunk);
 		//This second comparison is done because while memory-mapping the chunk we cannot exceed 
