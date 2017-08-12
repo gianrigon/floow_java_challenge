@@ -2,6 +2,7 @@ package com.thefloow.challenge;
 
 import com.mongodb.MongoClientURI;
 import com.mongodb.ServerAddress;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import java.io.File;
@@ -44,12 +45,13 @@ public class TextAnalyzer {
             l = java.util.logging.Logger.getGlobal();
             l.setLevel(Level.ALL);
             l.addHandler(f2);                        
-	    //Someone, for now, has magically told me how many servers there are and what is my position among
-		//them
-		final int NUM_WORKERS=1;
-		final int MY_POSITION=1;		
+	    //I initialize the variables to a canary value, further on i will read the correct values from the MongoDB 
+            //"Config" collection from the "ChallengeConfig" database            		
+		int NUM_WORKERS=1;
+		int MY_POSITION=1;		
                 String filePath=null;
                 String host="localhost";
+                String myId=java.net.Inet4Address.getLocalHost().getHostAddress();
                 int port=27017;
                 for (int a=0; a < args.length; ) {
                  if (args[a].equals("-source")) {
@@ -78,7 +80,23 @@ public class TextAnalyzer {
                       port = new Integer(params[1]);
                      }
                  }
+                 if (args[a].equals("-id")) {
+                   myId = args[a+1];
+                   a+=2;
+                 }
                 }
+                //Pre-Processing
+                com.mongodb.MongoClient startupC = new com.mongodb.MongoClient(host,port);				
+                MongoDatabase confDB = startupC.getDatabase("ChallengeConfig");		
+		com.mongodb.client.MongoCollection<org.bson.Document> configColl = confDB.getCollection("Config");                		
+                org.bson.Document conf=configColl.find(Filters.exists("maxInstances")).first();
+                NUM_WORKERS=conf.getInteger("maxInstances");
+                MY_POSITION=(int)configColl.count();
+                org.bson.Document myData = new org.bson.Document();
+                myData.append("worker_id", myId);
+                configColl.insertOne(myData);
+                startupC.close();
+                //End of Pre-Processing
 		final long maxAllowedSubChunk = Math.round(Runtime.getRuntime().maxMemory()*0.75); 
 		mutex = new java.util.concurrent.locks.ReentrantReadWriteLock(true);                
 		wordCounts = new TreeMap<String, Integer>();		
@@ -195,7 +213,30 @@ public class TextAnalyzer {
                         doc.replace(words_array[a],doc.getInteger(words_array[a]).intValue()+wordCounts.get(words_array[a]).intValue());
                     }                    
                     coll.updateOne(filter, doc, opt);
-                }                
+                }
+                MongoDatabase status = m.getDatabase("ChallengeConfig");
+                com.mongodb.client.MongoCollection<org.bson.Document> statusColl = status.getCollection("Config");                
+                java.util.Set<org.bson.Document> docs= new java.util.TreeSet<org.bson.Document>();
+                statusColl.find(Filters.exists("done")).into(docs);
+                if (docs.size() != NUM_WORKERS-1) {
+                    org.bson.Document myDoc = statusColl.find(Filters.eq("worker_id", myId)).first();
+                    myDoc.append("done", true);
+                    statusColl.replaceOne(Filters.eq("worker_id",myId), myDoc);
+                }
+                else {
+                    FindIterable list=coll.find();
+                    com.mongodb.client.MongoCursor it = list.iterator();
+                    while (it.hasNext()) {
+                        org.bson.Document d = (org.bson.Document)it.next();
+                        java.util.Set<String> ks = d.keySet();
+                        java.util.Iterator<String> it2=ks.iterator();
+                        while (it2.hasNext()) {
+                            String word = (String) it.next();
+                            l.info("The word "+word+" has occurred"+d.getInteger(word));
+                        }
+                    }
+                    statusColl.deleteMany(Filters.exists("done"));
+                }
 		m.close();				
 	}
         static class WorkerThread implements Runnable {              
