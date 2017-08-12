@@ -32,24 +32,38 @@ public class TextAnalyzer {
 	public static CharBuffer cb;	
         static final java.util.concurrent.locks.Lock w = new ReentrantLock(true);
         static java.util.logging.Logger l;
-	
+        static String [] words = null;
+	static int wordsPerThread=0;
+        static int wordsPos;
+        
 	public static void main(String[] args) throws InterruptedException, IOException {
             java.util.logging.FileHandler f2 = new java.util.logging.FileHandler(".\\logfile.log");
             l = java.util.logging.Logger.getGlobal();
             l.setLevel(Level.ALL);
-            l.addHandler(f2);            
+            l.addHandler(f2);                        
 	    //Someone, for now, has magically told me how many servers there are and what is my position among
 		//them
 		final int NUM_WORKERS=1;
 		final int MY_POSITION=1;
 		//final String filePath = "C:\\Users\\Paolo\\nuovo_test.xml";
                 String filePath=null;
-                for (int a=0; a < args.length; a++) {
-                 if (args[a].equals("-dump")) {
+                String host="localhost";
+                int port=27017;
+                for (int a=0; a < args.length; a+=2) {
+                 if (args[a].equals("-source")) {
                      File f = new File(args[a+1]);
                      if (f.exists()) {
                         filePath = f.getAbsolutePath();
                         l.info(filePath);
+                     }                     
+                 }
+                 if (args[a].equals("-mongo")) {
+                     String [] params=args[a+1].split(":");
+                     if (!params[0].isEmpty()) {
+                         host=params[0];
+                     }
+                     if (!params[1].isEmpty()) {
+                      port = new Integer(params[1]);
                      }
                  }
                 }
@@ -83,7 +97,7 @@ public class TextAnalyzer {
 		//If i have memory-mapped my subchunk (i'm using memory-mapping for performance reasons) i can start spawning threads to do the real work
 		int counter=0;	
 		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);
-		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();
+		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();                
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
                 while (mbb != null) {
 			try {
@@ -113,22 +127,23 @@ public class TextAnalyzer {
                                 
 			}
 			count = 0;
-			cb.rewind();                        
-			w.lock();
-                        long sPos = cb.position();                                
-			while (cb.position() < (subChunkSize/2) && cb.remaining() >= perThreadChunkSize/2) {
-                                sPos= cb.position(); 
-                                l.info("Thread "+count);
-				w.unlock();
+			cb.rewind();
+                        words=cb.toString().split("\\P{Alpha}");			
+                        wordsPos=0;
+                        l.info("There are "+words.length+" words to process");
+                        wordsPerThread=words.length/Runtime.getRuntime().availableProcessors();
+                        w.lock();                        
+			while (wordsPos < words.length) {                                				
 				//This is done to allow the thread to have time to read its own share of data
 				//sem.acquireUninterruptibly();                               
 				TextAnalyzer.WorkerThread wt = new TextAnalyzer.WorkerThread();
                                 Thread t = new Thread(wt);
-                                t.setName("Thread "+count);                                
-				t.start();				
-                                threads.add(t);
-                                //Synchro issues that the lock doesn't seem able to solve                                
+                                t.setName("Thread "+count);                                                                
+                                w.unlock();
+				t.start();
                                 w.lock();
+                                threads.add(t);
+                                //Synchro issues that the lock doesn't seem able to solve                                                                
                                 count++;
 				//w.lock();                                
 //                                l.info("Starting the busy waiting");
@@ -141,8 +156,8 @@ public class TextAnalyzer {
 //                                l.info("The thread should have copied its data");
 //                                System.out.flush();
 			}
-                   cb=null;     
-                   w.unlock();                   
+                   w.unlock();
+                   cb=null;                        
 		   System.gc();
                    for (int k=0; k < threads.size() ; k++) {                       
                        threads.get(k).join();                       
@@ -155,60 +170,45 @@ public class TextAnalyzer {
                 String [] keys_array = keys.toArray(new String[0]);                
                 f.close();
                 fc.close();                
-		com.mongodb.MongoClient m = new com.mongodb.MongoClient("alamo",27017);				
+		com.mongodb.MongoClient m = new com.mongodb.MongoClient(host,port);				
 		MongoDatabase db = m.getDatabase("word_count");		
 		com.mongodb.client.MongoCollection<org.bson.Document> coll = db.getCollection("counters");                		
                 Set<String> words=wordCounts.keySet();
                 String [] words_array=words.toArray(new String [0]);
-                for (int a=0; a < words_array.length; a++) {                
+                java.util.LinkedList<org.bson.Document> docList = new java.util.LinkedList<org.bson.Document>();
+                for (int a=0; a < words_array.length; a++) {                                    
                     org.bson.Document doc = /*new org.bson.Document(supportMap);*/ new org.bson.Document();
                     doc.append(words_array[a],wordCounts.get(words_array[a]));
-                    coll.insertOne(doc);
+                    docList.add(doc);
                 }
+                coll.insertMany(docList);
 		m.close();				
 	}
         static class WorkerThread implements Runnable {              
             public void run() {                                
-                    int id=-25;
-                    char[] myCopy=null;                    
+                    int sPos,fPos;
                     w.lock();
-                try {
-                    id=count;
-                    int arrSiz = Math.min(perThreadChunkSize/2,(TextAnalyzer.cb != null)?TextAnalyzer.cb.remaining():0);
-                    if (arrSiz == 0) {                        
-                        return;
-                    }
-                    myCopy = new char[arrSiz];                    
-                    for (int i=0; i < arrSiz; i++){
-                        myCopy[i]=TextAnalyzer.cb.get();
-                    }
-                } 
-                catch (Exception e) {
-                     l.info(e.getMessage());
-                     e.printStackTrace();
-                }
-                finally {
+                    sPos=wordsPos;
+                    fPos=sPos+Math.min(words.length-sPos,wordsPerThread);
+                    wordsPos=fPos+1;                    
                     w.unlock();
-                }
-                    String pvtStr=new String(myCopy);
-                    myCopy=null;
-                    //System.gc();
-                    String [] splitString = pvtStr.split("\\P{Alpha}");
+                    //System.gc();                    
                     //StringTokenizer tok=new StringTokenizer(pvtStr, " ?.,:;");                                        
-                    int j=0;
-                    while (j < splitString.length){
+                    int j=sPos;
+                    while (j < fPos){                        
                         //l.info("Processing the "+j+"th string by the "+id+"th thread");                        
                         w.lock();
                         try {
                             //l.info("This is thread nr. "+id+" processing word "+j+" out of "+splitString.length);
-                            if (wordCounts.containsKey(splitString[j].trim().toLowerCase())){
-                                int count = wordCounts.get(splitString[j].trim().toLowerCase());
+                            if (wordCounts.containsKey(words[j].trim().toLowerCase())){
+                                int count = wordCounts.get(words[j].trim().toLowerCase());
                                 count++;
-                                wordCounts.replace(splitString[j].trim().toLowerCase(), count);
+                                wordCounts.replace(words[j].trim().toLowerCase(), count);
                             }
                             else {
-                                wordCounts.put(splitString[j].trim().toLowerCase(), 1);
+                                wordCounts.put(words[j].trim().toLowerCase(), 1);
                             }
+                            l.info("We have found "+wordCounts.size()+" words up to now");
                         } 
                         catch (Exception e) {
                          l.info(e.getMessage());
