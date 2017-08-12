@@ -128,11 +128,7 @@ public class TextAnalyzer {
                                  System.gc();
 					
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
-                                StackTraceElement [] stack = e.getStackTrace();
-                                for (int hh=0; hh < stack.length; hh++) {
-                                    l.info("Errore alla riga : "+stack[hh].getLineNumber());
-                                }
+				// TODO Auto-generated catch block                                
                                 cb = CharBuffer.allocate(mbb.limit()/2);				 
 				mbb=null;
                                 System.exit(-30);
