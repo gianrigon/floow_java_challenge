@@ -15,6 +15,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
@@ -22,6 +23,8 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.BsonValue;
 import org.bson.conversions.Bson;
 
 
@@ -193,26 +196,45 @@ public class TextAnalyzer {
                 java.util.Set<String> keys=wordCounts.keySet();
                 String [] keys_array = keys.toArray(new String[0]);                
                 f.close();
-                fc.close();                
+                fc.close();
 		com.mongodb.MongoClient m = new com.mongodb.MongoClient(host,port);				
 		MongoDatabase db = m.getDatabase("word_count");		
 		com.mongodb.client.MongoCollection<org.bson.Document> coll = db.getCollection("counters");                		
                 Set<String> words=wordCounts.keySet();
-                String [] words_array=words.toArray(new String [0]);   
+                String [] words_array=words.toArray(new String [0]);                
                 Bson filter; 
                 com.mongodb.client.model.UpdateOptions opt = new com.mongodb.client.model.UpdateOptions();
-                opt.upsert(true);
+                opt=opt.upsert(true);
+                java.io.FileWriter fw = new java.io.FileWriter("DataDump.txt");
+                java.io.BufferedWriter bw = new java.io.BufferedWriter(fw);
+                for (int a=0; a < words_array.length; a++) {                
+                     fw.write(words_array[a]+"="+wordCounts.get(words_array[a])+";");
+                     fw.flush();
+                }
                 for (int a=0; a < words_array.length; a++) {                                    
-                    filter = Filters.exists(words_array[a]);
-                    org.bson.Document doc = /*new org.bson.Document(supportMap);*/ coll.find(filter).first();
+                    l.info(words_array[a]);
+                    filter = Filters.exists(words_array[a]);                    
+                    l.info("Filter correctly set up");
+                    BsonDocument bd = new BsonDocument();
+                    BsonValue bv = new BsonString("{$exists : true}");
+                    bd.append(words_array[a],bv);
+                    FindIterable<org.bson.Document> fi = coll.find(bd);
+                    java.util.ArrayList<org.bson.Document> al=new java.util.ArrayList<org.bson.Document>();
+                    fi.into(al);                    
+                    org.bson.Document doc = null;
+                    if (al.size() > 0 ){
+                        doc = /*new org.bson.Document(supportMap);*/ al.get(0);
+                    }
+                    l.info("Find operation completed successfully");
                     if (doc == null) {        
                      doc = new org.bson.Document();
-                     doc.append(words_array[a],wordCounts.get(words_array[a]));                    
+                     doc.append(words_array[a],wordCounts.get(words_array[a]));
+                     coll.insertOne(doc);
                     }
                     else {
                         doc.replace(words_array[a],doc.getInteger(words_array[a]).intValue()+wordCounts.get(words_array[a]).intValue());
-                    }                    
-                    coll.updateOne(filter, doc, opt);
+                        coll.updateOne(filter, doc, opt);
+                    }                                        
                 }
                 MongoDatabase status = m.getDatabase("ChallengeConfig");
                 com.mongodb.client.MongoCollection<org.bson.Document> statusColl = status.getCollection("Config");                
@@ -224,15 +246,17 @@ public class TextAnalyzer {
                     statusColl.replaceOne(Filters.eq("worker_id",myId), myDoc);
                 }
                 else {
-                    FindIterable list=coll.find();
-                    com.mongodb.client.MongoCursor it = list.iterator();
+                    FindIterable<org.bson.Document> list=coll.find();
+                    com.mongodb.client.MongoCursor<org.bson.Document> it = list.iterator();
                     while (it.hasNext()) {
                         org.bson.Document d = (org.bson.Document)it.next();
                         java.util.Set<String> ks = d.keySet();
                         java.util.Iterator<String> it2=ks.iterator();
                         while (it2.hasNext()) {
-                            String word = (String) it.next();
-                            l.info("The word "+word+" has occurred"+d.getInteger(word));
+                            String word = (String) it2.next();
+                            if (!word.equals("_id")) {
+                                l.info("The word "+word+" has occurred "+d.getInteger(word)+" times");
+                            }
                         }
                     }
                     statusColl.deleteMany(Filters.exists("done"));
@@ -255,15 +279,17 @@ public class TextAnalyzer {
                         w.lock();
                         try {
                             //l.info("This is thread nr. "+id+" processing word "+j+" out of "+splitString.length);
-                            if (wordCounts.containsKey(words[j].trim().toLowerCase())){
-                                int count = wordCounts.get(words[j].trim().toLowerCase());
-                                count++;
-                                wordCounts.replace(words[j].trim().toLowerCase(), count);
+                            if (words[j].trim().length() > 0) {
+                                if (wordCounts.containsKey(words[j].trim().toLowerCase())){
+                                    int count = wordCounts.get(words[j].trim().toLowerCase());
+                                    count++;
+                                    wordCounts.replace(words[j].trim().toLowerCase(), count);
+                                }
+                                else {
+                                    wordCounts.put(words[j].trim().toLowerCase(), 1);
+                                }
+                                l.info("We have found "+wordCounts.size()+" words up to now");
                             }
-                            else {
-                                wordCounts.put(words[j].trim().toLowerCase(), 1);
-                            }
-                            l.info("We have found "+wordCounts.size()+" words up to now");
                         } 
                         catch (Exception e) {
                          l.info(e.getMessage());
