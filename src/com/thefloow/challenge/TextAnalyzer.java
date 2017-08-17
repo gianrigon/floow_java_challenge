@@ -68,13 +68,13 @@ public class TextAnalyzer {
                  if (args[a].equals("-mongo")) {
                      String [] params=new String[0];                 
                      if (a+1 < args.length) {
-                     params=args[a+1].split(":");
-                     }
-                     if (params.length != 0 ) {
-                        a+=2;
+                      params=args[a+1].split(":");                      
+                     }                     
+                     if (args[a+1].contains(":")) {
+                      a+=2;
                      }
                      else {
-                      a++;
+                       a++;
                      }
                      if (params.length != 0 && !params[0].isEmpty()) {
                          host=params[0];
@@ -95,6 +95,7 @@ public class TextAnalyzer {
                 org.bson.Document conf=configColl.find(Filters.exists("maxInstances")).first();
                 NUM_WORKERS=conf.getInteger("maxInstances");
                 MY_POSITION=(int)configColl.count();
+                l.info("I am in "+(MY_POSITION+1)+"th position");                
                 org.bson.Document myData = new org.bson.Document();
                 myData.append("worker_id", myId);
                 configColl.insertOne(myData);
@@ -204,13 +205,7 @@ public class TextAnalyzer {
                 String [] words_array=words.toArray(new String [0]);                
                 Bson filter; 
                 com.mongodb.client.model.UpdateOptions opt = new com.mongodb.client.model.UpdateOptions();
-                opt=opt.upsert(true);
-                java.io.FileWriter fw = new java.io.FileWriter("DataDump.txt");
-                java.io.BufferedWriter bw = new java.io.BufferedWriter(fw);
-                for (int a=0; a < words_array.length; a++) {                
-                     fw.write(words_array[a]+"="+wordCounts.get(words_array[a])+";");
-                     fw.flush();
-                }
+                opt=opt.upsert(true);                
                 for (int a=0; a < words_array.length; a++) {                                    
                     l.info(words_array[a]);
                     filter = Filters.exists(words_array[a]);                    
