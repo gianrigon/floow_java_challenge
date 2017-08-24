@@ -47,11 +47,14 @@ public class TextAnalyzer {
 	static int wordsPerThread=0;
         static int wordsPos;
         
-	public static void main(String[] args) throws InterruptedException, IOException {
+	public static void main(String[] args) throws InterruptedException, IOException {                        
             java.util.logging.FileHandler f2 = new java.util.logging.FileHandler("."+File.separator+"logfile.log");
             l = java.util.logging.Logger.getGlobal();
             l.setLevel(Level.ALL);
-            l.addHandler(f2);                        
+            l.addHandler(f2);                  
+            l.warning(System.getProperty("java.class.path"));
+            System.setProperty("java.class.path", System.getProperty("java.class.path")+";"+"mongo-java-driver-3.4.3.jar");
+            l.warning(System.getProperty("java.class.path"));
 	    //I initialize the variables to a canary value, further on i will read the correct values from the MongoDB 
             //"Config" collection from the "ChallengeConfig" database            		
 		int NUM_WORKERS=1;
@@ -108,7 +111,7 @@ public class TextAnalyzer {
 		final long maxAllowedSubChunk = Math.round(Runtime.getRuntime().maxMemory()*0.75); 
 		mutex = new java.util.concurrent.locks.ReentrantReadWriteLock(true);                
 		wordCounts = new TreeMap<String, Integer>();		
-		java.io.RandomAccessFile f=null;				
+		java.io.RandomAccessFile f=null;                
 		try {
 			f = new java.io.RandomAccessFile(filePath,"r");
 		} catch (FileNotFoundException e) {
@@ -132,14 +135,14 @@ public class TextAnalyzer {
 		//Now i get the n-th chunk of data or the first subChunk of my share of data
 		java.nio.channels.FileChannel fc = f.getChannel();				
 		//If i have memory-mapped my subchunk (i'm using memory-mapping for performance reasons) i can start spawning threads to do the real work
-		int counter=0;	                
-		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);                                
+		int counter=0;	                                
+		mbb=fc.map(FileChannel.MapMode.READ_ONLY, ((MY_POSITION-1)*chunkSize+counter*subChunkSize%2==0)?(MY_POSITION-1)*chunkSize+counter*subChunkSize:(MY_POSITION-1)*chunkSize+counter*subChunkSize-1, subChunkSize);                                
 		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();                
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
                 while (mbb != null) {
 			try {
 				 if (counter*subChunkSize < chunkSize) {                                         
-					 mbb = fc.map(FileChannel.MapMode.READ_ONLY,(MY_POSITION-1)*chunkSize+counter*subChunkSize , subChunkSize);
+					 mbb = fc.map(FileChannel.MapMode.READ_ONLY,((MY_POSITION-1)*chunkSize+counter*subChunkSize%2==0)?(MY_POSITION-1)*chunkSize+counter*subChunkSize:(MY_POSITION-1)*chunkSize+counter*subChunkSize-1 , subChunkSize);
 				 }
 				 else{
 					break; 
@@ -157,7 +160,7 @@ public class TextAnalyzer {
 				mbb=null;
                                 System.exit(-30);
                                 
-			}
+			}                        
 			count = 0;
 			cb.rewind();
                         words=cb.toString().split("\\P{Alpha}");			
