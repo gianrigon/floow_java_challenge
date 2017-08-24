@@ -1,10 +1,13 @@
 package com.thefloow.challenge;
 
 import com.mongodb.MongoClientURI;
+import com.mongodb.ReadConcern;
 import com.mongodb.ServerAddress;
+import com.mongodb.WriteConcern;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -22,6 +25,7 @@ import java.util.TreeMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
 import org.bson.BsonString;
 import org.bson.BsonValue;
@@ -44,7 +48,7 @@ public class TextAnalyzer {
         static int wordsPos;
         
 	public static void main(String[] args) throws InterruptedException, IOException {
-            java.util.logging.FileHandler f2 = new java.util.logging.FileHandler(".\\logfile.log");
+            java.util.logging.FileHandler f2 = new java.util.logging.FileHandler("."+File.separator+"logfile.log");
             l = java.util.logging.Logger.getGlobal();
             l.setLevel(Level.ALL);
             l.addHandler(f2);                        
@@ -88,14 +92,14 @@ public class TextAnalyzer {
                    a+=2;
                  }
                 }
-                //Pre-Processing
-                com.mongodb.MongoClient startupC = new com.mongodb.MongoClient(host,port);				
+                //Pre-Processing                
+                com.mongodb.MongoClient startupC = new com.mongodb.MongoClient(host,port);                                                                
                 MongoDatabase confDB = startupC.getDatabase("ChallengeConfig");		
 		com.mongodb.client.MongoCollection<org.bson.Document> configColl = confDB.getCollection("Config");                		
-                org.bson.Document conf=configColl.find(Filters.exists("maxInstances")).first();
+                org.bson.Document conf=configColl.find(Filters.exists("maxInstances")).first();                
                 NUM_WORKERS=conf.getInteger("maxInstances");
                 MY_POSITION=(int)configColl.count();
-                l.info("I am in "+(MY_POSITION+1)+"th position");                
+                l.info("I am in "+(MY_POSITION)+"th position");                
                 org.bson.Document myData = new org.bson.Document();
                 myData.append("worker_id", myId);
                 configColl.insertOne(myData);
@@ -128,8 +132,8 @@ public class TextAnalyzer {
 		//Now i get the n-th chunk of data or the first subChunk of my share of data
 		java.nio.channels.FileChannel fc = f.getChannel();				
 		//If i have memory-mapped my subchunk (i'm using memory-mapping for performance reasons) i can start spawning threads to do the real work
-		int counter=0;	
-		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);
+		int counter=0;	                
+		mbb=fc.map(FileChannel.MapMode.READ_ONLY, (MY_POSITION-1)*chunkSize+counter*subChunkSize, subChunkSize);                                
 		perThreadChunkSize=(int)subChunkSize/Runtime.getRuntime().availableProcessors();                
 		java.util.LinkedList<Thread> threads = new java.util.LinkedList<Thread>();
                 while (mbb != null) {
@@ -140,7 +144,7 @@ public class TextAnalyzer {
 				 else{
 					break; 
 				 }				 
-				 Charset c = Charset.forName("UTF-8");				 
+				 Charset c = Charset.forName("UTF-16");				 
 				 CharsetDecoder cd = c.newDecoder();
 				 cb = CharBuffer.allocate(mbb.limit()/2);				 
 				 cd.decode(mbb,cb,true);                                  
@@ -157,8 +161,7 @@ public class TextAnalyzer {
 			count = 0;
 			cb.rewind();
                         words=cb.toString().split("\\P{Alpha}");			
-                        wordsPos=0;
-                        l.info("There are "+words.length+" words to process");
+                        wordsPos=0;                        
                         wordsPerThread=words.length/Runtime.getRuntime().availableProcessors();
                         w.lock();                        
 			while (wordsPos < words.length) {                                				
@@ -198,63 +201,53 @@ public class TextAnalyzer {
                 String [] keys_array = keys.toArray(new String[0]);                
                 f.close();
                 fc.close();
-		com.mongodb.MongoClient m = new com.mongodb.MongoClient(host,port);				
+                com.mongodb.MongoClientOptions.Builder b = new com.mongodb.MongoClientOptions.Builder();
+                //b=b.readConcern(ReadConcern.LOCAL);
+                b=b.writeConcern(new WriteConcern(1));                
+		com.mongodb.MongoClient m = new com.mongodb.MongoClient(host+":"+port,b.build());				                
 		MongoDatabase db = m.getDatabase("word_count");		
 		com.mongodb.client.MongoCollection<org.bson.Document> coll = db.getCollection("counters");                		
                 Set<String> words=wordCounts.keySet();
                 String [] words_array=words.toArray(new String [0]);                
-                Bson filter; 
+                BsonDocument filter; 
                 com.mongodb.client.model.UpdateOptions opt = new com.mongodb.client.model.UpdateOptions();
                 opt=opt.upsert(true);                
-                for (int a=0; a < words_array.length; a++) {                                    
-                    l.info(words_array[a]);
-                    filter = Filters.exists(words_array[a]);                    
-                    l.info("Filter correctly set up");
-                    BsonDocument bd = new BsonDocument();
-                    BsonValue bv = new BsonString("{$exists : true}");
-                    bd.append(words_array[a],bv);
-                    FindIterable<org.bson.Document> fi = coll.find(bd);
-                    java.util.ArrayList<org.bson.Document> al=new java.util.ArrayList<org.bson.Document>();
-                    fi.into(al);                    
+                for (int a=0; a < words_array.length; a++) {                                                                           
+                    FindIterable<org.bson.Document> fi = coll.find(Filters.eq("word", words_array[a]));
                     org.bson.Document doc = null;
-                    if (al.size() > 0 ){
-                        doc = /*new org.bson.Document(supportMap);*/ al.get(0);
+                    try {
+                     doc = fi.first();                      
+                    } catch (Exception e) {
+                      l.info(e.getMessage());
+                      l.info("The offending word was "+words_array[a]);
+                      continue;
                     }
-                    l.info("Find operation completed successfully");
-                    if (doc == null) {        
+                    if (doc == null) {                             
                      doc = new org.bson.Document();
-                     doc.append(words_array[a],wordCounts.get(words_array[a]));
+                     doc.append("word",words_array[a]);
+                     doc.append("count",wordCounts.get(words_array[a]));
                      coll.insertOne(doc);
                     }
-                    else {
-                        doc.replace(words_array[a],doc.getInteger(words_array[a]).intValue()+wordCounts.get(words_array[a]).intValue());
-                        coll.updateOne(filter, doc, opt);
+                    else {           
+                     coll.updateOne(Filters.eq("word", words_array[a]), Updates.inc("count", wordCounts.get(words_array[a])));
                     }                                        
                 }
                 MongoDatabase status = m.getDatabase("ChallengeConfig");
-                com.mongodb.client.MongoCollection<org.bson.Document> statusColl = status.getCollection("Config");                
-                java.util.Set<org.bson.Document> docs= new java.util.TreeSet<org.bson.Document>();
-                statusColl.find(Filters.exists("done")).into(docs);
-                if (docs.size() != NUM_WORKERS-1) {
+                com.mongodb.client.MongoCollection<org.bson.Document> statusColl = status.getCollection("Config");                                                
+                if (statusColl.count(Filters.exists("done"))  != NUM_WORKERS-1) {
                     org.bson.Document myDoc = statusColl.find(Filters.eq("worker_id", myId)).first();
                     myDoc.append("done", true);
                     statusColl.replaceOne(Filters.eq("worker_id",myId), myDoc);
                 }
-                else {
+                else {                                                                                
+                    l.info("Starting to show the results ...");
                     FindIterable<org.bson.Document> list=coll.find();
                     com.mongodb.client.MongoCursor<org.bson.Document> it = list.iterator();
                     while (it.hasNext()) {
                         org.bson.Document d = (org.bson.Document)it.next();
-                        java.util.Set<String> ks = d.keySet();
-                        java.util.Iterator<String> it2=ks.iterator();
-                        while (it2.hasNext()) {
-                            String word = (String) it2.next();
-                            if (!word.equals("_id")) {
-                                l.info("The word "+word+" has occurred "+d.getInteger(word)+" times");
-                            }
-                        }
+                        l.info("The word "+d.getString("word")+" has appeared "+d.getInteger("count")+" times");                        
                     }
-                    statusColl.deleteMany(Filters.exists("done"));
+                    statusColl.deleteMany(Filters.exists("worker_id"));
                 }
 		m.close();				
 	}
@@ -282,8 +275,7 @@ public class TextAnalyzer {
                                 }
                                 else {
                                     wordCounts.put(words[j].trim().toLowerCase(), 1);
-                                }
-                                l.info("We have found "+wordCounts.size()+" words up to now");
+                                }                                
                             }
                         } 
                         catch (Exception e) {
